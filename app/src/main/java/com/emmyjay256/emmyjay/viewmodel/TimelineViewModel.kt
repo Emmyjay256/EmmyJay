@@ -17,19 +17,33 @@ class TimelineViewModel(
     private val _todayDay = MutableStateFlow(todayAsInt())
     val todayDay: StateFlow<Int> = _todayDay.asStateFlow()
 
-    val tasksToday: StateFlow<List<TaskEntity>> =
+    private val todayIso: String
+        get() = LocalDate.now().toString()
+
+    private val tasksRaw: StateFlow<List<TaskEntity>> =
         todayDay.flatMapLatest { repo.observeTasksForDay(it) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // 91 hours = 5460 minutes
-    private val goalMinutes = 91L * 60L
+    val activeTasksToday: StateFlow<List<TaskEntity>> =
+        tasksRaw.map { list -> list.filter { it.lastCompletedDate != todayIso } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val completedTasksToday: StateFlow<List<TaskEntity>> =
+        tasksRaw.map { list -> list.filter { it.lastCompletedDate == todayIso } }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * Percent based ONLY on blocks visible today:
+     * doneMinutes / totalMinutes (for today's schedule)
+     */
     val percentOfGoal: StateFlow<Float> =
-        todayDay.flatMapLatest { day ->
-            repo.observeCompletedForDay(day).map { completed ->
-                val doneMinutes = completed.sumOf { it.durationMinutes() }
-                (doneMinutes.toFloat() / goalMinutes.toFloat()).coerceIn(0f, 1f)
-            }
+        tasksRaw.map { allToday ->
+            val totalMinutes = allToday.sumOf { it.durationMinutes() }.coerceAtLeast(1L)
+            val doneMinutes = allToday
+                .filter { it.lastCompletedDate == todayIso }
+                .sumOf { it.durationMinutes() }
+
+            (doneMinutes.toFloat() / totalMinutes.toFloat()).coerceIn(0f, 1f)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0f)
 
     fun refreshToday() {
@@ -38,13 +52,13 @@ class TimelineViewModel(
 
     fun complete(task: TaskEntity) {
         viewModelScope.launch {
-            repo.markCompleted(task)
+            repo.markCompletedToday(task, todayIso)
         }
     }
 
     private fun todayAsInt(): Int {
         val dow: DayOfWeek = LocalDate.now().dayOfWeek
-        return dow.value // 1..7
+        return dow.value
     }
 
     class Factory(private val repo: TaskRepository) : ViewModelProvider.Factory {

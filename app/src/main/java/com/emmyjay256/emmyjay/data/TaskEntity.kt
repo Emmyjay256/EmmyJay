@@ -8,12 +8,16 @@ import java.time.LocalTime
 data class TaskEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val title: String,
-    // 1..7 (Mon=1 ... Sun=7) matching java.time.DayOfWeek.value
+    // 1..7 (Mon=1 ... Sun=7)
     val dayOfWeek: Int,
     val startTime: LocalTime,
     val endTime: LocalTime,
     val category: TaskCategory,
-    val isCompleted: Boolean = false,
+
+    // Completion is PER DATE, so the task repeats weekly.
+    // ISO date string like "2026-02-15"
+    val lastCompletedDate: String? = null,
+
     val completedAtEpochMs: Long? = null
 ) {
     fun durationMinutes(): Long {

@@ -1,21 +1,27 @@
 package com.emmyjay256.emmyjay.ui
 
-import android.widget.NumberPicker
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import com.emmyjay256.emmyjay.data.TaskCategory
 import com.emmyjay256.emmyjay.data.TaskEntity
 import com.emmyjay256.emmyjay.viewmodel.ProgrammerViewModel
+import kotlinx.coroutines.launch
 import java.time.LocalTime
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,7 +51,6 @@ fun ProgrammerScreen(
             )
         }
     ) { pad ->
-        // ✅ One scrollable surface. No “page stuck” issue.
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -154,7 +159,6 @@ fun ProgrammerScreen(
                 Spacer(Modifier.height(6.dp))
             }
 
-            // ✅ Blocks are part of the same LazyColumn → page scrolls naturally
             items(items = tasks, key = { it.id }) { task ->
                 ProgrammerTaskRow(
                     task = task,
@@ -163,25 +167,22 @@ fun ProgrammerScreen(
             }
         }
 
-        // ✅ Real spinner wheels (NumberPicker), 3 visible numbers, always snapped.
+        // ✅ Compose wheel picker (3 visible, snapped, readable colors)
         if (showStartPicker) {
-            SpinnerTimePickerDialog(
+            ComposeTimePickerDialog(
                 title = "Select Start Time",
                 initial = startTime,
                 onDismiss = { showStartPicker = false },
                 onConfirm = { picked ->
                     startTime = picked
-                    // Optional: keep end >= start+1min automatically if user goes past it
-                    if (!endTime.isAfter(startTime)) {
-                        endTime = startTime.plusMinutes(30)
-                    }
+                    if (!endTime.isAfter(startTime)) endTime = startTime.plusMinutes(30)
                     showStartPicker = false
                 }
             )
         }
 
         if (showEndPicker) {
-            SpinnerTimePickerDialog(
+            ComposeTimePickerDialog(
                 title = "Select End Time",
                 initial = endTime,
                 onDismiss = { showEndPicker = false },
@@ -210,9 +211,8 @@ private fun DaySelectorScrollable(
     ) {
         items(7) { idx ->
             val day = idx + 1
-            val isSel = (day == selected)
             FilterChip(
-                selected = isSel,
+                selected = (day == selected),
                 onClick = { onSelect(day) },
                 label = { Text(labels[idx]) }
             )
@@ -265,10 +265,7 @@ private fun TimeButton(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
-    OutlinedButton(
-        onClick = onClick,
-        modifier = modifier
-    ) {
+    OutlinedButton(onClick = onClick, modifier = modifier) {
         Column(horizontalAlignment = Alignment.Start) {
             Text(label, style = MaterialTheme.typography.labelSmall)
             Text(time.toString(), style = MaterialTheme.typography.titleMedium)
@@ -302,15 +299,10 @@ private fun ProgrammerTaskRow(task: TaskEntity, onDelete: () -> Unit) {
     }
 }
 
-/**
- * REAL spinner wheels:
- * - Hour wheel (0..23)
- * - Minute wheel (0..59)
- * - 3 visible rows
- * - Always snapped (NumberPicker does that natively)
- */
+/* -------------------- Compose Time Picker Dialog -------------------- */
+
 @Composable
-private fun SpinnerTimePickerDialog(
+private fun ComposeTimePickerDialog(
     title: String,
     initial: LocalTime,
     onDismiss: () -> Unit,
@@ -328,18 +320,20 @@ private fun SpinnerTimePickerDialog(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                NumberPickerWheel(
-                    range = 0..23,
-                    value = hour,
-                    format = { it.toString().padStart(2, '0') },
-                    onValueChange = { hour = it }
+                SnapWheelPicker(
+                    range = (0..23).toList(),
+                    initialValue = hour,
+                    width = 84.dp,
+                    onValueChange = { hour = it },
+                    label = { it.toString().padStart(2, '0') }
                 )
                 Text(":", style = MaterialTheme.typography.titleLarge)
-                NumberPickerWheel(
-                    range = 0..59,
-                    value = minute,
-                    format = { it.toString().padStart(2, '0') },
-                    onValueChange = { minute = it }
+                SnapWheelPicker(
+                    range = (0..59).toList(),
+                    initialValue = minute,
+                    width = 84.dp,
+                    onValueChange = { minute = it },
+                    label = { it.toString().padStart(2, '0') }
                 )
             }
         },
@@ -352,33 +346,117 @@ private fun SpinnerTimePickerDialog(
     )
 }
 
+/**
+ * 3-visible-item snapping wheel picker.
+ * - Always centered
+ * - Always readable colors (no OEM NumberPicker weirdness, no reflection)
+ */
 @Composable
-private fun NumberPickerWheel(
-    range: IntRange,
-    value: Int,
-    format: (Int) -> String,
-    onValueChange: (Int) -> Unit
+private fun SnapWheelPicker(
+    range: List<Int>,
+    initialValue: Int,
+    width: Dp,
+    onValueChange: (Int) -> Unit,
+    label: (Int) -> String
 ) {
-    AndroidView(
-        factory = { context ->
-            NumberPicker(context).apply {
-                minValue = range.first
-                maxValue = range.last
-                wrapSelectorWheel = true
+    val itemHeight = 44.dp
+    val visibleCount = 3 // <- what you asked for
+    val paddingCount = visibleCount / 2
 
-                // ✅ Exactly 3 visible numbers
-                displayedValues = (range.first..range.last).map(format).toTypedArray()
-                setFormatter { i -> format(i) }
+    val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val fling = rememberSnapFlingBehavior(lazyListState = listState)
 
-                this.value = value
+    // Map value -> index
+    val initialIndex = remember(range, initialValue) {
+        range.indexOf(initialValue).coerceAtLeast(0)
+    }
 
-                setOnValueChangedListener { _, _, newVal ->
-                    onValueChange(newVal)
+    // Start centered (no “empty middle” issue)
+    LaunchedEffect(initialIndex) {
+        listState.scrollToItem(initialIndex)
+    }
+
+    // Determine centered item based on scroll position
+    val centeredIndex by remember {
+        derivedStateOf {
+            val first = listState.firstVisibleItemIndex
+            val offset = listState.firstVisibleItemScrollOffset
+            // if scrolled beyond half an item, center shifts down
+            val shift = if (offset > 22) 1 else 0
+            (first + shift).coerceIn(0, range.lastIndex)
+        }
+    }
+
+    // Push selected value outward whenever center changes (and snap on stop)
+    LaunchedEffect(centeredIndex) {
+        onValueChange(range[centeredIndex])
+    }
+
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (!listState.isScrollInProgress) {
+            // After fling ends, hard-snap to the centeredIndex
+            scope.launch {
+                listState.animateScrollToItem(centeredIndex)
+            }
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .width(width)
+            .height(itemHeight * visibleCount)
+    ) {
+        // Center highlight bar
+        Box(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .fillMaxWidth()
+                .height(itemHeight)
+                .background(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(12.dp)
+                )
+        )
+
+        LazyColumn(
+            state = listState,
+            flingBehavior = fling,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = itemHeight * paddingCount)
+        ) {
+            items(range.size) { idx ->
+                val v = range[idx]
+                val dist = abs(idx - centeredIndex)
+
+                val isCenter = (dist == 0)
+
+                val textColor = if (isCenter) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+
+                val textStyle = if (isCenter) {
+                    MaterialTheme.typography.titleLarge
+                } else {
+                    MaterialTheme.typography.titleMedium
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(itemHeight),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label(v),
+                        style = textStyle,
+                        color = textColor,
+                        textAlign = TextAlign.Center
+                    )
                 }
             }
-        },
-        update = { picker ->
-            if (picker.value != value) picker.value = value
         }
-    )
+    }
 }

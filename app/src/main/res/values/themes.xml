@@ -1,5 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.EmmyJay" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.EmmyJay" parent="android:Theme.Material.Light.NoActionBar">
+        <!-- Android 12+ splash screen background -->
+        <item name="android:windowSplashScreenBackground">#000000</item>
+
+        <!-- Fallback / pre-Android 12 window background -->
+        <item name="android:windowBackground">#000000</item>
+
+        <!-- If Android draws an icon background circle, make it black too -->
+        <item name="android:windowSplashScreenIconBackgroundColor">#000000</item>
+    </style>
+
 </resources>

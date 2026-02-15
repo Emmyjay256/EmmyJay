@@ -19,7 +19,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.emmyjay256.emmyjay.data.TaskEntity
 import com.emmyjay256.emmyjay.viewmodel.TimelineViewModel
-import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -27,23 +26,19 @@ fun TimelineScreen(
     vm: TimelineViewModel,
     onGoProgrammer: () -> Unit
 ) {
-    val tasks by vm.tasksToday.collectAsState()
+    val active by vm.activeTasksToday.collectAsState()
+    val completed by vm.completedTasksToday.collectAsState()
     val pct by vm.percentOfGoal.collectAsState()
 
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
 
     // Fixed height = 20% of screen
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val blockHeight = remember(screenHeightDp) { (screenHeightDp.dp * 0.20f) }
 
-    // First incomplete index (used for auto-scroll only)
-    val nextIndex = remember(tasks) {
-        tasks.indexOfFirst { !it.isCompleted }.takeIf { it >= 0 } ?: 0
-    }
-
-    LaunchedEffect(nextIndex) {
-        if (tasks.isNotEmpty()) listState.animateScrollToItem(nextIndex)
+    // When active changes (after swipe), scroll to top so next one is immediately visible
+    LaunchedEffect(active.size) {
+        if (active.isNotEmpty()) listState.animateScrollToItem(0)
     }
 
     Scaffold(
@@ -84,23 +79,40 @@ fun TimelineScreen(
                 ),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // ACTIVE (top)
                 items(
-                    count = tasks.size,
-                    key = { idx -> tasks[idx].id }
+                    count = active.size,
+                    key = { idx -> active[idx].id }
                 ) { idx ->
-                    val t = tasks[idx]
+                    val t = active[idx]
                     TimelineBlock(
                         task = t,
                         height = blockHeight,
-                        onComplete = {
-                            vm.complete(t)
-                            scope.launch {
-                                val target = tasks.indexOfFirst { !it.isCompleted }
-                                    .let { if (it < 0) 0 else it }
-                                listState.animateScrollToItem(target)
-                            }
-                        }
+                        onSwipeComplete = { vm.complete(t) }
                     )
+                }
+
+                // COMPLETED HEADER + COMPLETED LIST
+                if (completed.isNotEmpty()) {
+                    item {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Completed",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    items(
+                        count = completed.size,
+                        key = { idx -> completed[idx].id }
+                    ) { idx ->
+                        val t = completed[idx]
+                        CompletedBlock(
+                            task = t,
+                            height = blockHeight
+                        )
+                    }
                 }
             }
         }
@@ -112,12 +124,12 @@ fun TimelineScreen(
 private fun TimelineBlock(
     task: TaskEntity,
     height: Dp,
-    onComplete: () -> Unit
+    onSwipeComplete: () -> Unit
 ) {
     val dismissState = rememberDismissState(
         confirmStateChange = { value ->
             if (value == DismissValue.DismissedToEnd || value == DismissValue.DismissedToStart) {
-                if (!task.isCompleted) onComplete()
+                onSwipeComplete()
                 false
             } else true
         }
@@ -126,26 +138,15 @@ private fun TimelineBlock(
     SwipeToDismiss(
         state = dismissState,
         directions = setOf(DismissDirection.EndToStart, DismissDirection.StartToEnd),
-        background = {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(height)
-            )
-        },
+        background = { Box(modifier = Modifier.fillMaxWidth().height(height)) },
         dismissContent = {
-            val alpha = if (task.isCompleted) 0.55f else 1f
-
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(height),
-                // ✅ Increased border radius
                 shape = RoundedCornerShape(22.dp),
                 elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha)
-                )
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
             ) {
                 Column(
                     modifier = Modifier
@@ -172,19 +173,52 @@ private fun TimelineBlock(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-
-                    Spacer(Modifier.weight(1f))
-
-                    // ✅ Only show Completed (no “Active Block” anymore)
-                    if (task.isCompleted) {
-                        Text(
-                            text = "Completed",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
                 }
             }
         }
     )
+}
+
+@Composable
+private fun CompletedBlock(
+    task: TaskEntity,
+    height: Dp
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height),
+        shape = RoundedCornerShape(22.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+        )
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 14.dp)
+        ) {
+            Text(
+                text = task.title,
+                style = MaterialTheme.typography.titleLarge
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            Text(
+                text = "${task.startTime} → ${task.endTime}",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.SemiBold
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                text = task.category.name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }

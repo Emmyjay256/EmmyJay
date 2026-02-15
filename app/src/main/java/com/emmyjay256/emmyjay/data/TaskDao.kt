@@ -13,12 +13,13 @@ interface TaskDao {
     """)
     fun observeTasksForDay(day: Int): Flow<List<TaskEntity>>
 
+    // ✅ used for day-finalization logging
     @Query("""
         SELECT * FROM tasks
-        WHERE dayOfWeek = :day AND isCompleted = 1
+        WHERE dayOfWeek = :day
         ORDER BY startTime ASC
     """)
-    fun observeCompletedForDay(day: Int): Flow<List<TaskEntity>>
+    suspend fun getTasksForDay(day: Int): List<TaskEntity>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(task: TaskEntity): Long
