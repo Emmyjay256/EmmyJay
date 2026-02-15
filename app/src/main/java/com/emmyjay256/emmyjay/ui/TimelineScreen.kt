@@ -19,6 +19,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.emmyjay256.emmyjay.data.TaskEntity
 import com.emmyjay256.emmyjay.viewmodel.TimelineViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.time.LocalTime
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterialApi::class)
 @Composable
@@ -36,12 +39,46 @@ fun TimelineScreen(
     val screenHeightDp = LocalConfiguration.current.screenHeightDp
     val blockHeight = remember(screenHeightDp) { (screenHeightDp.dp * 0.20f) }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
     // When active changes (after swipe), scroll to top so next one is immediately visible
     LaunchedEffect(active.size) {
         if (active.isNotEmpty()) listState.animateScrollToItem(0)
     }
 
+    fun showUndoSnackbar(
+        message: String,
+        onUndo: () -> Unit
+    ) {
+        // kill any previous snackbar (only one undo window at a time)
+        snackbarHostState.currentSnackbarData?.dismiss()
+
+        scope.launch {
+            val mySnackbarJob = launch {
+                val result = snackbarHostState.showSnackbar(
+                    message = message,
+                    actionLabel = "UNDO",
+                    withDismissAction = false,
+                    duration = SnackbarDuration.Indefinite
+                )
+                if (result == SnackbarResult.ActionPerformed) {
+                    onUndo()
+                }
+            }
+
+            // auto-dismiss after 3 seconds
+            launch {
+                delay(3000)
+                snackbarHostState.currentSnackbarData?.dismiss()
+            }
+
+            mySnackbarJob.join()
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("EmmyJay") },
@@ -88,11 +125,19 @@ fun TimelineScreen(
                     TimelineBlock(
                         task = t,
                         height = blockHeight,
-                        onSwipeComplete = { vm.complete(t) }
+                        onSwipeComplete = {
+                            // Only completes if midpoint reached (inside TimelineBlock)
+                            vm.complete(t)
+
+                            showUndoSnackbar(
+                                message = "Completed: ${t.title}",
+                                onUndo = { vm.undoComplete(t) }
+                            )
+                        }
                     )
                 }
 
-                // COMPLETED HEADER + COMPLETED LIST
+                // COMPLETED HEADER + COMPLETED LIST (swipe to revert)
                 if (completed.isNotEmpty()) {
                     item {
                         Spacer(Modifier.height(6.dp))
@@ -108,9 +153,18 @@ fun TimelineScreen(
                         key = { idx -> completed[idx].id }
                     ) { idx ->
                         val t = completed[idx]
-                        CompletedBlock(
+                        RevertibleCompletedBlock(
                             task = t,
-                            height = blockHeight
+                            height = blockHeight,
+                            onSwipeRevert = {
+                                vm.undoComplete(t)
+
+                                // allow undo of the revert (i.e., re-complete it)
+                                showUndoSnackbar(
+                                    message = "Reverted: ${t.title}",
+                                    onUndo = { vm.complete(t) }
+                                )
+                            }
                         )
                     }
                 }
@@ -128,8 +182,13 @@ private fun TimelineBlock(
 ) {
     val dismissState = rememberDismissState(
         confirmStateChange = { value ->
-            if (value == DismissValue.DismissedToEnd || value == DismissValue.DismissedToStart) {
-                onSwipeComplete()
+            val swiped =
+                value == DismissValue.DismissedToEnd || value == DismissValue.DismissedToStart
+
+            if (swiped) {
+                if (canCompleteNow(task)) {
+                    onSwipeComplete()
+                }
                 false
             } else true
         }
@@ -140,58 +199,65 @@ private fun TimelineBlock(
         directions = setOf(DismissDirection.EndToStart, DismissDirection.StartToEnd),
         background = { Box(modifier = Modifier.fillMaxWidth().height(height)) },
         dismissContent = {
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(height),
-                shape = RoundedCornerShape(22.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
-                ) {
-                    Text(
-                        text = task.title,
-                        style = MaterialTheme.typography.titleLarge
-                    )
+            TaskCard(
+                task = task,
+                height = height,
+                alpha = 1f,
+                elevation = 6.dp
+            )
+        }
+    )
+}
 
-                    Spacer(Modifier.height(10.dp))
+@OptIn(ExperimentalMaterialApi::class)
+@Composable
+private fun RevertibleCompletedBlock(
+    task: TaskEntity,
+    height: Dp,
+    onSwipeRevert: () -> Unit
+) {
+    val dismissState = rememberDismissState(
+        confirmStateChange = { value ->
+            val swiped =
+                value == DismissValue.DismissedToEnd || value == DismissValue.DismissedToStart
 
-                    Text(
-                        text = "${task.startTime} → ${task.endTime}",
-                        style = MaterialTheme.typography.displaySmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
+            if (swiped) {
+                onSwipeRevert()
+                false // keep item; list will recompose because state changes
+            } else true
+        }
+    )
 
-                    Spacer(Modifier.height(8.dp))
-
-                    Text(
-                        text = task.category.name,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+    SwipeToDismiss(
+        state = dismissState,
+        directions = setOf(DismissDirection.EndToStart, DismissDirection.StartToEnd),
+        background = { Box(modifier = Modifier.fillMaxWidth().height(height)) },
+        dismissContent = {
+            TaskCard(
+                task = task,
+                height = height,
+                alpha = 0.55f,
+                elevation = 2.dp
+            )
         }
     )
 }
 
 @Composable
-private fun CompletedBlock(
+private fun TaskCard(
     task: TaskEntity,
-    height: Dp
+    height: Dp,
+    alpha: Float,
+    elevation: Dp
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .height(height),
         shape = RoundedCornerShape(22.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = elevation),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha)
         )
     ) {
         Column(
@@ -221,4 +287,15 @@ private fun CompletedBlock(
             )
         }
     }
+}
+
+private fun canCompleteNow(task: TaskEntity, now: LocalTime = LocalTime.now()): Boolean {
+    val start = task.startTime
+    val end = task.endTime
+    if (!end.isAfter(start)) return true
+
+    val durationMinutes = task.durationMinutes().toInt()
+    val halfMinutes = durationMinutes / 2
+    val midpoint = start.plusMinutes(halfMinutes.toLong())
+    return !now.isBefore(midpoint)
 }

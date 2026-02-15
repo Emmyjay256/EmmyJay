@@ -56,6 +56,13 @@ class TimelineViewModel(
         }
     }
 
+    // ✅ ADD THIS: used by TimelineScreen Undo + "swipe completed to revert"
+    fun undoComplete(task: TaskEntity) {
+        viewModelScope.launch {
+            repo.markIncomplete(task)
+        }
+    }
+
     private fun todayAsInt(): Int {
         val dow: DayOfWeek = LocalDate.now().dayOfWeek
         return dow.value
