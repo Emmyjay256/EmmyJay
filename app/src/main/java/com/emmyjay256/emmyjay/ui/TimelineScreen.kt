@@ -3,6 +3,7 @@ package com.emmyjay256.emmyjay.ui
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.DismissDirection
 import androidx.compose.material.DismissValue
 import androidx.compose.material.ExperimentalMaterialApi
@@ -11,8 +12,9 @@ import androidx.compose.material.rememberDismissState
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.emmyjay256.emmyjay.data.TaskEntity
@@ -31,16 +33,17 @@ fun TimelineScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    // Find first incomplete index (the “next block”)
+    // Fixed height = 20% of screen
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp
+    val blockHeight = remember(screenHeightDp) { (screenHeightDp.dp * 0.20f) }
+
+    // First incomplete index (used for auto-scroll only)
     val nextIndex = remember(tasks) {
         tasks.indexOfFirst { !it.isCompleted }.takeIf { it >= 0 } ?: 0
     }
 
     LaunchedEffect(nextIndex) {
-        // auto-scroll so the next block becomes top/active
-        if (tasks.isNotEmpty()) {
-            listState.animateScrollToItem(nextIndex)
-        }
+        if (tasks.isNotEmpty()) listState.animateScrollToItem(nextIndex)
     }
 
     Scaffold(
@@ -70,11 +73,16 @@ fun TimelineScreen(
                     .height(6.dp)
             )
 
-            // Gapless: no padding, no spacing
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(0.dp)
+                contentPadding = PaddingValues(
+                    start = 12.dp,
+                    end = 12.dp,
+                    top = 10.dp,
+                    bottom = 14.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(
                     count = tasks.size,
@@ -83,13 +91,11 @@ fun TimelineScreen(
                     val t = tasks[idx]
                     TimelineBlock(
                         task = t,
-                        isActive = (idx == nextIndex && !t.isCompleted),
-                        height = heightForTask(t),
+                        height = blockHeight,
                         onComplete = {
                             vm.complete(t)
                             scope.launch {
-                                val updated = tasks
-                                val target = updated.indexOfFirst { !it.isCompleted }
+                                val target = tasks.indexOfFirst { !it.isCompleted }
                                     .let { if (it < 0) 0 else it }
                                 listState.animateScrollToItem(target)
                             }
@@ -101,17 +107,10 @@ fun TimelineScreen(
     }
 }
 
-private fun heightForTask(task: TaskEntity): Dp {
-    val dpPerMinute = 2.2f
-    val mins = task.durationMinutes().coerceAtLeast(15)
-    return (mins * dpPerMinute).dp
-}
-
 @OptIn(ExperimentalMaterialApi::class)
 @Composable
 private fun TimelineBlock(
     task: TaskEntity,
-    isActive: Boolean,
     height: Dp,
     onComplete: () -> Unit
 ) {
@@ -120,9 +119,7 @@ private fun TimelineBlock(
             if (value == DismissValue.DismissedToEnd || value == DismissValue.DismissedToStart) {
                 if (!task.isCompleted) onComplete()
                 false
-            } else {
-                true
-            }
+            } else true
         }
     )
 
@@ -137,51 +134,54 @@ private fun TimelineBlock(
             )
         },
         dismissContent = {
-            val tonal = if (isActive) 6.dp else 2.dp
             val alpha = if (task.isCompleted) 0.55f else 1f
 
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(height),
-                shape = MaterialTheme.shapes.extraSmall,
-                elevation = CardDefaults.cardElevation(defaultElevation = tonal),
+                // ✅ Increased border radius
+                shape = RoundedCornerShape(22.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = alpha)
                 )
             ) {
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.Top
+                        .padding(horizontal = 16.dp, vertical = 14.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = task.title,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+
+                    Spacer(Modifier.height(10.dp))
+
+                    Text(
+                        text = "${task.startTime} → ${task.endTime}",
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Spacer(Modifier.height(8.dp))
+
+                    Text(
+                        text = task.category.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(Modifier.weight(1f))
+
+                    // ✅ Only show Completed (no “Active Block” anymore)
+                    if (task.isCompleted) {
                         Text(
-                            text = task.title,
-                            style = MaterialTheme.typography.titleMedium
+                            text = "Completed",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary
                         )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            text = "${task.startTime} → ${task.endTime}  •  ${task.category.name}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (task.isCompleted) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "Completed",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        } else if (isActive) {
-                            Spacer(Modifier.height(8.dp))
-                            Text(
-                                text = "Active Block",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
                     }
                 }
             }
