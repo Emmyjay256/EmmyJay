@@ -13,9 +13,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.emmyjay256.emmyjay.data.TaskCategory
 import com.emmyjay256.emmyjay.data.TaskEntity
 import com.emmyjay256.emmyjay.viewmodel.ProgrammerViewModel
@@ -29,6 +32,7 @@ fun ProgrammerScreen(
     vm: ProgrammerViewModel,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current // ✅ Get context to pass to VM for Alarms
     val selectedDay by vm.selectedDay.collectAsState()
     val tasks by vm.tasksForSelectedDay.collectAsState()
 
@@ -46,7 +50,7 @@ fun ProgrammerScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Programmer") },
+                title = { Text("Programmer", fontWeight = FontWeight.Bold) },
                 navigationIcon = { TextButton(onClick = onBack) { Text("Back") } }
             )
         }
@@ -122,7 +126,9 @@ fun ProgrammerScreen(
                             onClick = {
                                 val t = title.trim()
                                 if (t.isNotEmpty() && endTime.isAfter(startTime)) {
+                                    // ✅ Now passing context correctly
                                     vm.addTask(
+                                        context = context,
                                         title = t,
                                         start = startTime,
                                         end = endTime,
@@ -167,7 +173,6 @@ fun ProgrammerScreen(
             }
         }
 
-        // ✅ Compose wheel picker (3 visible, snapped, readable colors)
         if (showStartPicker) {
             ComposeTimePickerDialog(
                 title = "Select Start Time",
@@ -294,12 +299,10 @@ private fun ProgrammerTaskRow(task: TaskEntity, onDelete: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            TextButton(onClick = onDelete) { Text("Delete") }
+            TextButton(onClick = onDelete) { Text("Delete", color = MaterialTheme.colorScheme.error) }
         }
     }
 }
-
-/* -------------------- Compose Time Picker Dialog -------------------- */
 
 @Composable
 private fun ComposeTimePickerDialog(
@@ -346,11 +349,6 @@ private fun ComposeTimePickerDialog(
     )
 }
 
-/**
- * 3-visible-item snapping wheel picker.
- * - Always centered
- * - Always readable colors (no OEM NumberPicker weirdness, no reflection)
- */
 @Composable
 private fun SnapWheelPicker(
     range: List<Int>,
@@ -360,42 +358,36 @@ private fun SnapWheelPicker(
     label: (Int) -> String
 ) {
     val itemHeight = 44.dp
-    val visibleCount = 3 // <- what you asked for
+    val visibleCount = 3
     val paddingCount = visibleCount / 2
 
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val fling = rememberSnapFlingBehavior(lazyListState = listState)
 
-    // Map value -> index
     val initialIndex = remember(range, initialValue) {
         range.indexOf(initialValue).coerceAtLeast(0)
     }
 
-    // Start centered (no “empty middle” issue)
     LaunchedEffect(initialIndex) {
         listState.scrollToItem(initialIndex)
     }
 
-    // Determine centered item based on scroll position
     val centeredIndex by remember {
         derivedStateOf {
             val first = listState.firstVisibleItemIndex
             val offset = listState.firstVisibleItemScrollOffset
-            // if scrolled beyond half an item, center shifts down
             val shift = if (offset > 22) 1 else 0
             (first + shift).coerceIn(0, range.lastIndex)
         }
     }
 
-    // Push selected value outward whenever center changes (and snap on stop)
     LaunchedEffect(centeredIndex) {
         onValueChange(range[centeredIndex])
     }
 
     LaunchedEffect(listState.isScrollInProgress) {
         if (!listState.isScrollInProgress) {
-            // After fling ends, hard-snap to the centeredIndex
             scope.launch {
                 listState.animateScrollToItem(centeredIndex)
             }
@@ -407,7 +399,6 @@ private fun SnapWheelPicker(
             .width(width)
             .height(itemHeight * visibleCount)
     ) {
-        // Center highlight bar
         Box(
             modifier = Modifier
                 .align(Alignment.Center)
@@ -428,20 +419,10 @@ private fun SnapWheelPicker(
             items(range.size) { idx ->
                 val v = range[idx]
                 val dist = abs(idx - centeredIndex)
-
                 val isCenter = (dist == 0)
 
-                val textColor = if (isCenter) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                }
-
-                val textStyle = if (isCenter) {
-                    MaterialTheme.typography.titleLarge
-                } else {
-                    MaterialTheme.typography.titleMedium
-                }
+                val textColor = if (isCenter) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                val textStyle = if (isCenter) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium
 
                 Box(
                     modifier = Modifier

@@ -26,7 +26,12 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            buildConfigField("String", "GEMINI_API_KEY", "\"${project.findProperty("GEMINI_API_KEY") ?: ""}\"")
         }
+        debug {
+            buildConfigField("String", "GEMINI_API_KEY", "\"${project.findProperty("GEMINI_API_KEY") ?: ""}\"")
+        }
+
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -37,6 +42,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -60,7 +66,8 @@ dependencies {
 
 
 
-
+    implementation("androidx.lifecycle:lifecycle-service:2.8.7")
+    implementation("com.google.ai.client.generativeai:generativeai:0.9.0")
     // Compose Navigation (2 screens)
     implementation("androidx.navigation:navigation-compose:2.7.7")
 

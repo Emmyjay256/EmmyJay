@@ -1,5 +1,6 @@
 package com.emmyjay256.emmyjay.viewmodel
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -14,7 +15,7 @@ class ProgrammerViewModel(
     private val repo: TaskRepository
 ) : ViewModel() {
 
-    private val _selectedDay = MutableStateFlow(1) // Mon default
+    private val _selectedDay = MutableStateFlow(1)
     val selectedDay: StateFlow<Int> = _selectedDay.asStateFlow()
 
     val tasksForSelectedDay: StateFlow<List<TaskEntity>> =
@@ -26,21 +27,23 @@ class ProgrammerViewModel(
     }
 
     fun addTask(
+        context: Context,
         title: String,
         start: LocalTime,
         end: LocalTime,
         category: TaskCategory
     ) {
         viewModelScope.launch {
-            repo.upsert(
-                TaskEntity(
-                    title = title.trim(),
-                    dayOfWeek = selectedDay.value,
-                    startTime = start,
-                    endTime = end,
-                    category = category
-                )
+            val task = TaskEntity(
+                title = title.trim(),
+                dayOfWeek = selectedDay.value,
+                startTime = start,
+                endTime = end,
+                category = category
             )
+            val newId = repo.upsert(task)
+            repo.scheduleTaskAlarms(context, task.copy(id = newId))
+            repo.scheduleDailyFinalizeAlarm(context)
         }
     }
 
